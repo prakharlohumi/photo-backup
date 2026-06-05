@@ -63,6 +63,7 @@ pub fn scan_source(source_root: impl AsRef<Path>) -> anyhow::Result<ScanResult> 
             remote_media_id: None,
             upload_token: None,
             last_error: None,
+            skip_reason: None,
             next_retry_at_unix_secs: None,
         });
     }

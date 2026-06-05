@@ -38,6 +38,7 @@ pub struct BackupItem {
     pub remote_media_id: Option<String>,
     pub upload_token: Option<String>,
     pub last_error: Option<String>,
+    pub skip_reason: Option<String>,
     pub next_retry_at_unix_secs: Option<u64>,
 }
 
@@ -63,10 +64,22 @@ pub struct BackupSnapshot {
     pub running: bool,
     pub current_item: Option<String>,
     pub last_message: Option<String>,
+    pub skipped_items: Vec<BackupItemSummary>,
+    pub failed_items: Vec<BackupItemSummary>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanResult {
     pub source_root: PathBuf,
     pub items: Vec<BackupItem>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BackupItemSummary {
+    pub path: String,
+    pub status: ItemStatus,
+    pub attempts: u32,
+    pub error: Option<String>,
+    pub reason: Option<String>,
+    pub remote_media_id: Option<String>,
 }

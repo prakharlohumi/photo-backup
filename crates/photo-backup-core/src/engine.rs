@@ -181,6 +181,9 @@ fn run_worker(
     for item in checkpoint.items.values_mut() {
         if matches!(item.kind, FileKind::Unsupported) {
             item.status = ItemStatus::Skipped;
+            if item.skip_reason.is_none() {
+                item.skip_reason = Some(String::from("unsupported file type"));
+            }
         } else if matches!(item.status, ItemStatus::Discovered | ItemStatus::Failed) {
             item.status = ItemStatus::Queued;
         }
@@ -207,10 +210,14 @@ fn run_worker(
                 };
 
                 if matches!(item.status, ItemStatus::Committed | ItemStatus::Skipped) {
+                    if matches!(item.status, ItemStatus::Skipped) && item.skip_reason.is_none() {
+                        item.skip_reason = Some(skip_reason_for(item));
+                    }
                     continue;
                 }
                 if matches!(item.kind, FileKind::Unsupported) {
                     item.status = ItemStatus::Skipped;
+                    item.skip_reason = Some(skip_reason_for(item));
                     item.clone()
                 } else {
                     item.status = ItemStatus::Uploading;
@@ -330,6 +337,13 @@ fn now_plus(duration: Duration) -> u64 {
         .and_then(|ts| ts.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_secs())
         .unwrap_or_default()
+}
+
+fn skip_reason_for(item: &crate::model::BackupItem) -> String {
+    match item.kind {
+        FileKind::Unsupported => String::from("unsupported file type"),
+        _ => String::from("skipped by resume state"),
+    }
 }
 
 fn remove_if_exists(path: &Path) -> anyhow::Result<()> {

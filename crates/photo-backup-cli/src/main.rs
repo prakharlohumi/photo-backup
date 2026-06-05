@@ -26,6 +26,7 @@ fn main() -> anyhow::Result<()> {
         line.clear();
         if io::stdin().read_line(&mut line)? == 0 {
             controller.stop()?;
+            print_status_report(&controller.snapshot()?);
             break;
         }
 
@@ -44,8 +45,7 @@ fn main() -> anyhow::Result<()> {
                 println!("resumed");
             }
             "status" => {
-                let snapshot = controller.snapshot()?;
-                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+                print_status_report(&controller.snapshot()?);
             }
             "rescan" => {
                 controller.refresh_state()?;
@@ -57,6 +57,7 @@ fn main() -> anyhow::Result<()> {
             }
             "quit" | "exit" => {
                 controller.stop()?;
+                print_status_report(&controller.snapshot()?);
                 break;
             }
             "" => {}
@@ -67,6 +68,58 @@ fn main() -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn print_status_report(snapshot: &photo_backup_core::BackupSnapshot) {
+    println!("--- backup status ---");
+    println!("source root: {}", snapshot.source_root.display());
+    println!("total items: {}", snapshot.total_items);
+    println!("committed: {}", snapshot.committed);
+    println!("skipped: {}", snapshot.skipped);
+    println!("failed: {}", snapshot.failed);
+    println!("retrying: {}", snapshot.retrying);
+    println!("queued: {}", snapshot.queued);
+    println!("uploading: {}", snapshot.uploading);
+    println!("paused: {}", snapshot.paused);
+    println!("running: {}", snapshot.running);
+    if let Some(current_item) = &snapshot.current_item {
+        println!("current item: {current_item}");
+    }
+    if let Some(message) = &snapshot.last_message {
+        println!("last message: {message}");
+    }
+
+    if !snapshot.failed_items.is_empty() {
+        println!("failed files:");
+        for item in &snapshot.failed_items {
+            if let Some(error) = &item.error {
+                println!(
+                    "  - {} (attempts: {}, error: {})",
+                    item.path, item.attempts, error
+                );
+            } else {
+                println!(
+                    "  - {} (attempts: {}, no error recorded)",
+                    item.path, item.attempts
+                );
+            }
+        }
+    } else {
+        println!("failed files: none");
+    }
+
+    if !snapshot.skipped_items.is_empty() {
+        println!("skipped files:");
+        for item in &snapshot.skipped_items {
+            if let Some(reason) = &item.reason {
+                println!("  - {} ({reason})", item.path);
+            } else {
+                println!("  - {}", item.path);
+            }
+        }
+    }
+
+    println!("---------------------");
 }
 
 #[derive(Debug, Clone)]

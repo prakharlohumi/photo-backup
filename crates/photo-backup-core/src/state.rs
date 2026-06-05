@@ -1,4 +1,4 @@
-use crate::model::{BackupItem, BackupSnapshot, ItemStatus, ScanResult};
+use crate::model::{BackupItem, BackupItemSummary, BackupSnapshot, ItemStatus, ScanResult};
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -147,6 +147,13 @@ impl StateStore {
                 ItemStatus::Retrying => snapshot.retrying += 1,
                 ItemStatus::Failed => snapshot.failed += 1,
             }
+
+            if matches!(item.status, ItemStatus::Skipped) {
+                snapshot.skipped_items.push(summary_for(key, item));
+            }
+            if matches!(item.status, ItemStatus::Failed) {
+                snapshot.failed_items.push(summary_for(key, item));
+            }
             if snapshot.current_item.is_none()
                 && matches!(item.status, ItemStatus::Uploading | ItemStatus::Retrying)
             {
@@ -155,6 +162,17 @@ impl StateStore {
         }
 
         snapshot
+    }
+}
+
+fn summary_for(key: &str, item: &BackupItem) -> BackupItemSummary {
+    BackupItemSummary {
+        path: key.to_string(),
+        status: item.status.clone(),
+        attempts: item.attempts,
+        error: item.last_error.clone(),
+        reason: item.skip_reason.clone(),
+        remote_media_id: item.remote_media_id.clone(),
     }
 }
 
@@ -219,6 +237,7 @@ mod tests {
                 remote_media_id: None,
                 upload_token: None,
                 last_error: None,
+                skip_reason: None,
                 next_retry_at_unix_secs: None,
             }],
         };
