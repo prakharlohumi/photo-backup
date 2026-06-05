@@ -1,0 +1,4 @@
+/target
+/.photo-backup-state
+**/.photo-backup-state
+.DS_Store

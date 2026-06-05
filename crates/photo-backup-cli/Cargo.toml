@@ -1,0 +1,10 @@
+[package]
+name = "photo-backup-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1"
+photo-backup-core = { path = "../photo-backup-core" }
+serde_json = "1"
+

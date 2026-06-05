@@ -1,0 +1,7 @@
+[workspace]
+members = [
+    "crates/photo-backup-core",
+    "crates/photo-backup-cli",
+]
+resolver = "2"
+
