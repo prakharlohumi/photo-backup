@@ -4,6 +4,7 @@ use anyhow::Context;
 use reqwest::blocking::Client;
 use serde::Deserialize;
 use std::fs;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct GooglePhotosUploader {
@@ -14,7 +15,11 @@ pub struct GooglePhotosUploader {
 impl GooglePhotosUploader {
     pub fn new(token: TokenCache) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(Duration::from_secs(20))
+                .connect_timeout(Duration::from_secs(10))
+                .build()
+                .expect("failed to build reqwest client"),
             token,
         }
     }

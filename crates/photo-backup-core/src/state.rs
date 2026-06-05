@@ -68,6 +68,13 @@ impl StateStore {
         write_json_atomic(&self.checkpoint_path, checkpoint)
     }
 
+    pub fn clear_all(&self) -> anyhow::Result<()> {
+        remove_if_exists(&self.manifest_path)?;
+        remove_if_exists(&self.checkpoint_path)?;
+        remove_if_exists(&self.events_path)?;
+        Ok(())
+    }
+
     pub fn append_event(
         &self,
         kind: impl Into<String>,
@@ -177,6 +184,13 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> anyhow::Result<()>
     let data = serde_json::to_vec_pretty(value)?;
     fs::write(&temp_path, data)?;
     fs::rename(&temp_path, path)?;
+    Ok(())
+}
+
+fn remove_if_exists(path: &Path) -> anyhow::Result<()> {
+    if path.exists() {
+        fs::remove_file(path).with_context(|| format!("failed to remove {}", path.display()))?;
+    }
     Ok(())
 }
 

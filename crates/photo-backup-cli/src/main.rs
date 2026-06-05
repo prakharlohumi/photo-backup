@@ -17,7 +17,7 @@ fn main() -> anyhow::Result<()> {
     println!("photo-backup TUI");
     println!("source: {}", args.source_root.display());
     println!("state:  {}", args.state_dir.display());
-    println!("commands: start, pause, resume, status, rescan, quit");
+    println!("commands: start, pause, resume, status, rescan, clean, quit");
 
     let mut line = String::new();
     loop {
@@ -50,6 +50,10 @@ fn main() -> anyhow::Result<()> {
             "rescan" => {
                 controller.refresh_state()?;
                 println!("rescanned");
+            }
+            "clean" => {
+                controller.clean()?;
+                println!("backup state cleaned");
             }
             "quit" | "exit" => {
                 controller.stop()?;

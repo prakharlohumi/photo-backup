@@ -8,6 +8,8 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -38,7 +40,10 @@ pub struct GoogleAuthConfig {
     pub token_cache_path: PathBuf,
 }
 
-pub fn load_or_authorize(config: &GoogleAuthConfig) -> anyhow::Result<TokenCache> {
+pub fn load_or_authorize(
+    config: &GoogleAuthConfig,
+    stop_requested: &Arc<AtomicBool>,
+) -> anyhow::Result<TokenCache> {
     if let Some(token) = load_token(&config.token_cache_path)? {
         if !token.is_expired() {
             return Ok(token);
@@ -51,7 +56,7 @@ pub fn load_or_authorize(config: &GoogleAuthConfig) -> anyhow::Result<TokenCache
         }
     }
 
-    let token = interactive_login(config)?;
+    let token = interactive_login_with_stop(config, stop_requested)?;
     save_token(&config.token_cache_path, &token)?;
     Ok(token)
 }
@@ -60,7 +65,7 @@ pub fn refresh_access_token(
     config: &GoogleAuthConfig,
     refresh_token: &str,
 ) -> anyhow::Result<TokenCache> {
-    let client = Client::new();
+    let client = http_client()?;
     let mut form = vec![
         ("client_id", config.client_id.clone()),
         ("grant_type", String::from("refresh_token")),
@@ -84,10 +89,14 @@ pub fn refresh_access_token(
     })
 }
 
-fn interactive_login(config: &GoogleAuthConfig) -> anyhow::Result<TokenCache> {
+pub fn interactive_login_with_stop(
+    config: &GoogleAuthConfig,
+    stop_requested: &Arc<AtomicBool>,
+) -> anyhow::Result<TokenCache> {
     let verifier = random_verifier();
     let challenge = pkce_challenge(&verifier);
     let listener = TcpListener::bind("127.0.0.1:0")?;
+    listener.set_nonblocking(true)?;
     let redirect_uri = format!(
         "http://127.0.0.1:{}/callback",
         listener.local_addr()?.port()
@@ -99,12 +108,12 @@ fn interactive_login(config: &GoogleAuthConfig) -> anyhow::Result<TokenCache> {
         println!("Open this URL in your browser:\n{auth_url}");
     }
 
-    let (code, returned_state) = receive_code(listener)?;
+    let (code, returned_state) = receive_code(listener, stop_requested)?;
     if returned_state != state {
         anyhow::bail!("OAuth state mismatch");
     }
 
-    let client = Client::new();
+    let client = http_client()?;
     let mut form = vec![
         ("client_id", config.client_id.clone()),
         ("code", code),
@@ -130,31 +139,46 @@ fn interactive_login(config: &GoogleAuthConfig) -> anyhow::Result<TokenCache> {
     })
 }
 
-fn receive_code(listener: TcpListener) -> anyhow::Result<(String, String)> {
-    let (mut stream, _) = listener.accept()?;
-    let mut buffer = [0u8; 4096];
-    let bytes = stream.read(&mut buffer)?;
-    let request = String::from_utf8_lossy(&buffer[..bytes]);
-    let request_line = request.lines().next().context("missing request line")?;
-    let mut parts = request_line.split_whitespace();
-    let _method = parts.next().context("missing method")?;
-    let path = parts.next().context("missing path")?;
-    let response =
-        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nYou can return to the backup app.";
-    stream.write_all(response.as_bytes())?;
+fn receive_code(
+    listener: TcpListener,
+    stop_requested: &Arc<AtomicBool>,
+) -> anyhow::Result<(String, String)> {
+    loop {
+        if stop_requested.load(Ordering::SeqCst) {
+            anyhow::bail!("authorization cancelled");
+        }
 
-    let url = url::Url::parse(&format!("http://localhost{path}"))?;
-    let code = url
-        .query_pairs()
-        .find(|(key, _)| key == "code")
-        .map(|(_, value)| value.to_string())
-        .context("missing authorization code")?;
-    let state = url
-        .query_pairs()
-        .find(|(key, _)| key == "state")
-        .map(|(_, value)| value.to_string())
-        .context("missing oauth state")?;
-    Ok((code, state))
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let mut buffer = [0u8; 4096];
+                let bytes = stream.read(&mut buffer)?;
+                let request = String::from_utf8_lossy(&buffer[..bytes]);
+                let request_line = request.lines().next().context("missing request line")?;
+                let mut parts = request_line.split_whitespace();
+                let _method = parts.next().context("missing method")?;
+                let path = parts.next().context("missing path")?;
+                let response = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nYou can return to the backup app.";
+                stream.write_all(response.as_bytes())?;
+
+                let url = url::Url::parse(&format!("http://localhost{path}"))?;
+                let code = url
+                    .query_pairs()
+                    .find(|(key, _)| key == "code")
+                    .map(|(_, value)| value.to_string())
+                    .context("missing authorization code")?;
+                let state = url
+                    .query_pairs()
+                    .find(|(key, _)| key == "state")
+                    .map(|(_, value)| value.to_string())
+                    .context("missing oauth state")?;
+                return Ok((code, state));
+            }
+            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(200));
+            }
+            Err(err) => return Err(err.into()),
+        }
+    }
 }
 
 fn build_auth_url(client_id: &str, redirect_uri: &str, challenge: &str, state: &str) -> String {
@@ -181,6 +205,13 @@ fn random_state() -> String {
 fn pkce_challenge(verifier: &str) -> String {
     let digest = Sha256::digest(verifier.as_bytes());
     URL_SAFE_NO_PAD.encode(digest)
+}
+
+fn http_client() -> anyhow::Result<Client> {
+    Ok(Client::builder()
+        .timeout(Duration::from_secs(20))
+        .connect_timeout(Duration::from_secs(10))
+        .build()?)
 }
 
 #[derive(Debug, Clone, Deserialize)]

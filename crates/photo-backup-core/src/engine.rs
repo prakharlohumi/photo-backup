@@ -104,6 +104,20 @@ impl BackupController {
         Ok(())
     }
 
+    pub fn clean(&self) -> anyhow::Result<()> {
+        self.stop()?;
+        self.store.clear_all()?;
+        remove_if_exists(&self.settings.state_dir.join("google_token.json"))?;
+        let mut runtime = self.runtime.lock().unwrap();
+        runtime.running = false;
+        runtime.current_item = None;
+        runtime.last_message = Some(String::from("backup state cleaned"));
+        runtime.worker_join = None;
+        self.stop_requested.store(false, Ordering::SeqCst);
+        self.paused.store(false, Ordering::SeqCst);
+        Ok(())
+    }
+
     pub fn snapshot(&self) -> anyhow::Result<BackupSnapshot> {
         let checkpoint = self.store.load_checkpoint()?;
         let mut snapshot = self.store.snapshot(&checkpoint);
@@ -148,11 +162,14 @@ fn run_worker(
     stop_requested: Arc<AtomicBool>,
     runtime: Arc<Mutex<RuntimeState>>,
 ) -> anyhow::Result<()> {
-    let auth = load_or_authorize(&GoogleAuthConfig {
-        client_id: settings.client_id.clone(),
-        client_secret: settings.client_secret.clone(),
-        token_cache_path: settings.state_dir.join("google_token.json"),
-    })?;
+    let auth = load_or_authorize(
+        &GoogleAuthConfig {
+            client_id: settings.client_id.clone(),
+            client_secret: settings.client_secret.clone(),
+            token_cache_path: settings.state_dir.join("google_token.json"),
+        },
+        &stop_requested,
+    )?;
     let uploader = GooglePhotosUploader::new(auth);
     let retry_policy = RetryPolicy::default();
 
@@ -313,6 +330,13 @@ fn now_plus(duration: Duration) -> u64 {
         .and_then(|ts| ts.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_secs())
         .unwrap_or_default()
+}
+
+fn remove_if_exists(path: &Path) -> anyhow::Result<()> {
+    if path.exists() {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

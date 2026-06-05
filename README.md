@@ -17,6 +17,7 @@ It stores progress on disk so an interrupted backup can resume later.
   - `resume`
   - `status`
   - `rescan`
+  - `clean`
   - `quit`
 
 ## Requirements
@@ -100,6 +101,7 @@ If you do not pass `--state-dir`, the app uses a hidden `.photo-backup-state` fo
    - `resume` to continue after a pause
    - `status` to print progress as JSON
    - `rescan` to scan the source folder again
+   - `clean` to wipe the current local backup state for that folder
    - `quit` to stop the program
 
 ## State Files
@@ -151,4 +153,3 @@ cargo fmt --all
 cargo test
 cargo run -p photo-backup-cli -- /path/to/source-folder
 ```
-
